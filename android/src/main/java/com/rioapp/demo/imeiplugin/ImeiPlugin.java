@@ -10,6 +10,7 @@ import android.os.Build;
 import android.telephony.TelephonyManager;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
@@ -37,6 +38,7 @@ public class ImeiPlugin implements FlutterPlugin, MethodCallHandler, ActivityAwa
     private Activity mActivity;
     private MethodChannel mChannel;
     private ActivityPluginBinding mActivityPluginBinding;
+    @Nullable
     private Result mResult;
 
     private static final int MY_PERMISSIONS_REQUEST_READ_PHONE_STATE = 1995;
@@ -55,15 +57,13 @@ public class ImeiPlugin implements FlutterPlugin, MethodCallHandler, ActivityAwa
      */
     public static void registerWith(Registrar registrar) {
         final MethodChannel channel = new MethodChannel(registrar.messenger(), CHANNEL);
-        ImeiPlugin imeiPlugin = new ImeiPlugin();
+        final ImeiPlugin imeiPlugin = new ImeiPlugin();
         channel.setMethodCallHandler(imeiPlugin);
         registrar.addRequestPermissionsResultListener(imeiPlugin);
     }
 
     @Override
     public void onMethodCall(@NonNull MethodCall call, @NonNull Result result) {
-        mResult = result;
-
         try {
             SSRPR = "true".equals(call.<String>argument("ssrpr"));
         } catch (Exception e) {
@@ -72,7 +72,7 @@ public class ImeiPlugin implements FlutterPlugin, MethodCallHandler, ActivityAwa
 
         switch (call.method) {
             case "getImei":
-                getImei(mActivity, mResult);
+                getImei(mActivity, result);
                 break;
             case "getImeiMulti":
                 getImeiMulti(mActivity, result);
@@ -81,25 +81,30 @@ public class ImeiPlugin implements FlutterPlugin, MethodCallHandler, ActivityAwa
                 getID(mActivity, result);
                 break;
             default:
-                mResult.notImplemented();
+                result.notImplemented();
                 break;
         }
-
     }
 
     @Override
     public boolean onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
-        if (requestCode == MY_PERMISSIONS_REQUEST_READ_PHONE_STATE || requestCode == MY_PERMISSIONS_REQUEST_READ_PHONE_STATE_IMEI_MULTI) {
-            if (results[0] == PackageManager.PERMISSION_GRANTED) {
-                if (requestCode == MY_PERMISSIONS_REQUEST_READ_PHONE_STATE) {
-                    getImei(mActivity, mResult);
+        if (mResult == null) {
+            return false;
+        }
+        try {
+            if (requestCode == MY_PERMISSIONS_REQUEST_READ_PHONE_STATE || requestCode == MY_PERMISSIONS_REQUEST_READ_PHONE_STATE_IMEI_MULTI) {
+                if (results[0] == PackageManager.PERMISSION_GRANTED) {
+                    if (requestCode == MY_PERMISSIONS_REQUEST_READ_PHONE_STATE) {
+                        getImei(mActivity, mResult);
+                    } else {
+                        getImeiMulti(mActivity, mResult);
+                    }
                 } else {
-                    getImeiMulti(mActivity, mResult);
+                    mResult.error(ERCODE_PERMISSIONS_DENIED, "Permission Denied", null);
                 }
-            } else {
-                mResult.error(ERCODE_PERMISSIONS_DENIED, "Permission Denied", null);
+                return true;
             }
-            return true;
+        } catch (Exception ignored) {
         }
 
         return false;
@@ -153,12 +158,13 @@ public class ImeiPlugin implements FlutterPlugin, MethodCallHandler, ActivityAwa
     }
 
     @SuppressLint("HardwareIds")
-    private static void getImei(Activity activity, Result result) {
+    private void getImei(Activity activity, Result result) {
+        mResult = null;
         try {
             if (android.os.Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
                 result.success(getUUID(activity));
             } else if (ContextCompat.checkSelfPermission((activity), Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) {
-                TelephonyManager telephonyManager = (TelephonyManager) activity.getSystemService(Context.TELEPHONY_SERVICE);
+                final TelephonyManager telephonyManager = (TelephonyManager) activity.getSystemService(Context.TELEPHONY_SERVICE);
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     result.success(telephonyManager.getImei());
@@ -169,6 +175,7 @@ public class ImeiPlugin implements FlutterPlugin, MethodCallHandler, ActivityAwa
                 if (SSRPR && ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.READ_PHONE_STATE)) {
                     result.error(ERCODE_PERMISSIONS_DENIED, "Permission Denied", null);
                 } else {
+                    mResult = result;
                     ActivityCompat.requestPermissions(activity, new String[]{Manifest.permission.READ_PHONE_STATE}, MY_PERMISSIONS_REQUEST_READ_PHONE_STATE);
                 }
             }
@@ -178,7 +185,8 @@ public class ImeiPlugin implements FlutterPlugin, MethodCallHandler, ActivityAwa
     }
 
     @SuppressLint("HardwareIds")
-    private static void getImeiMulti(Activity activity, Result result) {
+    private void getImeiMulti(Activity activity, Result result) {
+        mResult = null;
         try {
             if (android.os.Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
                 result.success(Collections.singletonList(getUUID(activity)));
@@ -204,6 +212,7 @@ public class ImeiPlugin implements FlutterPlugin, MethodCallHandler, ActivityAwa
                 if (SSRPR && ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.READ_PHONE_STATE)) {
                     result.error(ERCODE_PERMISSIONS_DENIED, "Permission Denied", null);
                 } else {
+                    mResult = result;
                     ActivityCompat.requestPermissions(activity, new String[]{Manifest.permission.READ_PHONE_STATE}, MY_PERMISSIONS_REQUEST_READ_PHONE_STATE_IMEI_MULTI);
                 }
             }
@@ -212,7 +221,8 @@ public class ImeiPlugin implements FlutterPlugin, MethodCallHandler, ActivityAwa
         }
     }
 
-    private synchronized static String getUUID(Context context) {
+    @NonNull
+    private synchronized static String getUUID(@NonNull Context context) {
         final SharedPreferences sharedPrefs = context.getSharedPreferences(PREF_UNIQUE_ID, Context.MODE_PRIVATE);
         String uniqueID = sharedPrefs.getString(PREF_UNIQUE_ID, null);
         if (uniqueID == null) {
@@ -225,7 +235,7 @@ public class ImeiPlugin implements FlutterPlugin, MethodCallHandler, ActivityAwa
         return uniqueID;
     }
 
-    private static void getID(Context context, Result result) {
+    private static void getID(Context context, @NonNull Result result) {
         result.success(getUUID(context));
     }
 }
